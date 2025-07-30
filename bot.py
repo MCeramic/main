@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Updated for Render deployment
-# Remove ngrok setup and use static Render URL
+# Fixed Facebook media server access issues
 
 import json
 import os
@@ -29,15 +29,15 @@ logger.addHandler(console)
 seen_users = {}
 processed_events = {}
 
-# Define tokens (replace with your actual tokens)
-PAGE_ACCESS_TOKEN = "EAAI8hsGDfMkBPN1hMM5Glu2OVYpZCw3Qymo5374WYQh7i1vNhaYir7ZCbeojNeetDVxeJ42VgUy30qdLM7Sy8kRO5lM2WCTpNNuByYmyeLWfxcXuLxqKfI7yT11RmhRQiZBGCmGPZBl8ZBcv2zWJsqK4cPZCwZBYMzqQRG3kcrGo1L8L4p3tZBFSM6jQNdTQF4g8agKC"
-VERIFY_TOKEN = "mceramic"
+# Define tokens (get from environment variables with fallbacks)
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN", "EAAI8hsGDfMkBPN1hMM5Glu2OVYpZCw3Qymo5374WYQh7i1vNhaYir7ZCbeojNeetDVxeJ42VgUy30qdLM7Sy8kRO5lM2WCTpNNuByYmyeLWfxcXuLxqKfI7yT11RmhRQiZBGCmGPZBl8ZBcv2zWJsqK4cPZCwZBYMzqQRG3kcrGo1L8L4p3tZBFSM6jQNdTQF4g8agKC")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "mceramic")
 
 app = Flask(__name__)
 
 # Static server URL for Render
-SERVER_URL = "https://main-owe4.onrender.com"
-logger.info(f"🖧 Using static server URL: {SERVER_URL}")
+SERVER_URL = os.getenv("SERVER_URL", "https://main-owe4.onrender.com")
+logger.info(f"🖧 Using server URL: {SERVER_URL}")
 
 @app.route('/')
 def test():
@@ -47,15 +47,116 @@ def test():
 @app.route('/images/<path:path>')
 def serve_image(path):
     logger.info(f"📷 Żądanie obrazu: {path}")
-    return send_from_directory('images', path)
+    
+    # Check if file exists first
+    import os
+    file_path = os.path.join('images', path)
+    
+    if os.path.exists(file_path):
+        try:
+            # Add proper headers for Facebook's media server
+            response = send_from_directory('images', path)
+            
+            # Set proper MIME type based on file extension
+            if path.lower().endswith('.png'):
+                response.headers['Content-Type'] = 'image/png'
+            elif path.lower().endswith('.jpg') or path.lower().endswith('.jpeg'):
+                response.headers['Content-Type'] = 'image/jpeg'
+            elif path.lower().endswith('.gif'):
+                response.headers['Content-Type'] = 'image/gif'
+            elif path.lower().endswith('.webp'):
+                response.headers['Content-Type'] = 'image/webp'
+            elif path.lower().endswith('.svg'):
+                response.headers['Content-Type'] = 'image/svg+xml'
+            
+            # Enhanced headers specifically for Facebook's media crawler
+            response.headers['Cache-Control'] = 'public, max-age=86400'  # 24 hours
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'User-Agent, Content-Type'
+            
+            # Facebook-specific headers
+            response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            
+            logger.info(f"✅ Obraz {path} zwrócony z nagłówkami Facebook-friendly")
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Błąd podczas zwracania obrazu {path}: {e}")
+    
+    # Return a placeholder SVG image instead of 404
+    logger.warning(f"⚠️ Obraz nie znaleziony: {path}")
+    placeholder_svg = f'''<svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
+        <rect width="400" height="300" fill="#f8f9fa" stroke="#dee2e6"/>
+        <text x="200" y="140" text-anchor="middle" font-family="Arial" font-size="14" fill="#6c757d">
+            ARDEX Product Image
+        </text>
+        <text x="200" y="160" text-anchor="middle" font-family="Arial" font-size="12" fill="#adb5bd">
+            {path}
+        </text>
+        <text x="200" y="180" text-anchor="middle" font-family="Arial" font-size="10" fill="#ced4da">
+            Image placeholder - coming soon
+        </text>
+    </svg>'''
+    
+    response = Response(placeholder_svg, mimetype='image/svg+xml')
+    response.headers['Cache-Control'] = 'public, max-age=3600'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+    response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
 
 @app.route('/robots.txt')
 def robots():
     logger.info("📄 robots.txt będzie zwrócony")
+    # Updated robots.txt to specifically allow Facebook's media crawlers
     content = """User-agent: *
 Allow: /images/
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: facebookexternalhit/1.1
+Allow: /
+
+User-agent: Facebot
+Allow: /
+
+User-agent: FacebookBot
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+User-agent: Meta-ExternalFetcher
+Allow: /
+
+User-agent: WhatsApp
+Allow: /
+
+Sitemap: """ + SERVER_URL + """/sitemap.xml
 """
     return Response(content, mimetype='text/plain')
+
+@app.route('/sitemap.xml')
+def sitemap():
+    """Generate a basic sitemap for better crawling"""
+    logger.info("📄 sitemap.xml będzie zwrócony")
+    sitemap_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>{SERVER_URL}/</loc>
+        <changefreq>daily</changefreq>
+        <priority>1.0</priority>
+    </url>
+    <url>
+        <loc>{SERVER_URL}/images/</loc>
+        <changefreq>weekly</changefreq>
+        <priority>0.8</priority>
+    </url>
+</urlset>"""
+    return Response(sitemap_content, mimetype='application/xml')
 
 # Systems and products data
 page_to_intent_products = {
@@ -171,429 +272,278 @@ def search_systems(sender_id, user_text):
             matching_systems.append((page_num, system_intent, score))
             logger.debug(f"System '{system_intent}' ma {score} wspólnych produktów: {common_products}")
     
-    if matching_systems:
-        # Sortujemy według liczby wspólnych produktów (score)
-        matching_systems.sort(key=lambda x: x[2], reverse=True)
-        system_list = "\n".join([f"{i+1}. {system[1]}" for i, system in enumerate(matching_systems[:3])])  # Max 3
-        initial_message = f"🔍 Znaleziono pasujące systemy na podstawie produktów:\n{system_list}"
-        buttons = [
-            {"type": "postback", "title": f"System {i+1}", "payload": f"SELECT_SYSTEM_{system[0]}"}
-            for i, system in enumerate(matching_systems[:3])
-        ]
-        logger.info(f"🔍 Znaleziono {len(matching_systems)} pasujących systemów dla '{user_text}'")
-        return [{"text": initial_message}, {"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Wybierz system:", "buttons": buttons}}}]
+    # Sortujemy systemy według liczby wspólnych produktów (malejąco)
+    matching_systems.sort(key=lambda x: x[2], reverse=True)
     
-    logger.warning(f"⚠️ Nie znaleziono systemów pasujących do produktów dla '{user_text}'")
-    return None
+    if not matching_systems:
+        logger.warning(f"⚠️ Nie znaleziono systemów dla produktów: {found_products}")
+        return None
+    
+    # Zwracamy top 3 systemy
+    top_systems = matching_systems[:3]
+    logger.info(f"🔍 Znaleziono {len(top_systems)} systemów dla '{user_text}'")
+    
+    return top_systems
 
 def search_products(sender_id, user_text, return_products_only=False):
     user_text = user_text.lower()
     if user_text.startswith("⚠️"):
         logger.debug(f"Skipped processing error message: {user_text}")
+        return [] if return_products_only else None
+    
+    found_products = []
+    search_keywords = []
+    
+    # Szukamy produktów na podstawie słów kluczowych
+    for keyword, products in keyword_to_products.items():
+        if keyword.lower() in user_text:
+            found_products.extend(products)
+            search_keywords.append(keyword)
+            logger.debug(f"🔑 Znaleziono słowo kluczowe: '{keyword}' -> {len(products)} produktów")
+    
+    # Deduplicate products
+    found_products = list(set(found_products))
+    
+    # Szukamy bezpośrednio po nazwach produktów
+    for product_name in products_data.keys():
+        if product_name.lower() in user_text:
+            if product_name not in found_products:
+                found_products.append(product_name)
+                logger.debug(f"🎯 Znaleziono produkt po nazwie: '{product_name}'")
+    
+    if return_products_only:
+        return found_products
+    
+    if not found_products:
+        logger.warning(f"⚠️ Nie znaleziono produktów dla zapytania: '{user_text}'")
         return None
     
-    matching_products = set()  # Używamy set, aby uniknąć duplikatów
-    
-    # 1. Szukamy w keyword_to_products
-    for keyword, products in keyword_to_products.items():
-        keyword_lower = keyword.lower()
-        match_ratio = difflib.SequenceMatcher(None, user_text, keyword_lower).ratio()
-        if match_ratio > 0.4 or user_text in keyword_lower:
-            matching_products.update(products)
-            logger.debug(f"Dopasowano keyword '{keyword}' z ratio {match_ratio}")
-    
-    # 2. Szukamy w page_to_intent_products["products"]
-    for page_num, system_data in page_to_intent_products.items():
-        intent = system_data["intent"].lower()
-        system_products = system_data.get("products", [])
-        match_ratio = difflib.SequenceMatcher(None, user_text, intent).ratio()
-        if match_ratio > 0.4 or user_text in intent:
-            matching_products.update(system_products)
-            logger.debug(f"Dopasowano system '{intent}' z ratio {match_ratio}")
-    
-    # Konwertujemy na listę i sortujemy
-    matching_products = sorted(list(matching_products))
-    
-    if matching_products:
-        logger.info(f"🛠️ Znaleziono {len(matching_products)} pasujących produktów dla '{user_text}'")
-        
-        if return_products_only:
-            return matching_products  # Zwracamy listę produktów
-        
-        product_list = "\n".join([f"• {product}" for product in matching_products[:15]])  # Max 15
-        initial_message = f"🛠️ Znalazłem pasujące produkty:\n{product_list}\n\nCo chcesz zobaczyć?"
-        buttons = [
-            {"type": "postback", "title": "Opis produktu", "payload": f"DESCRIBE_PRODUCT_{user_text}"},
-            {"type": "postback", "title": "Systemy", "payload": f"SHOW_SYSTEMS_{user_text}"}
-        ]
-        return [{"attachment": {"type": "template", "payload": {"template_type": "button", "text": initial_message, "buttons": buttons}}}]
-    
-    logger.warning(f"⚠️ Nie znaleziono pasujących produktów dla '{user_text}'")
-    return [{"text": "⚠️ Nie znalazłem pasujących produktów. Spróbuj inaczej!"}]
+    logger.info(f"🔍 Znaleziono {len(found_products)} produktów dla '{user_text}'")
+    return found_products[:10]  # Limit to 10 products
 
-def describe_product(sender_id, user_text):
-    user_text = user_text.lower()
-    logger.debug(f"📋 Rozpoczynam describe_product dla '{user_text}'")
+def send_message(sender_id, message_text):
+    """Send text message to user"""
+    headers = {
+        'Content-Type': 'application/json',
+    }
     
-    user_keywords = set(user_text.split())
-    best_match = None
-    best_score = 0
+    data = {
+        'recipient': {'id': sender_id},
+        'message': {'text': message_text}
+    }
     
-    for keyword, products in keyword_to_products.items():
-        keyword_lower = keyword.lower()
-        keyword_words = set(keyword_lower.split())
-        common_keywords = user_keywords.intersection(keyword_words)
-        match_ratio = difflib.SequenceMatcher(None, user_text, keyword_lower).ratio()
-        
-        score = len(common_keywords) * 2 + match_ratio
-        if score > best_score and (len(common_keywords) > 0 or match_ratio > 0.5):
-            best_score = score
-            best_match = products
+    url = f'https://graph.facebook.com/v12.0/me/messages?access_token={PAGE_ACCESS_TOKEN}'
     
-    if best_match:
-        initial_products = best_match[:2]
-        buttons = [{"type": "postback", "title": product[:20], "payload": f"SHOW_PRODUCT_{product}"} for product in initial_products]
-        if len(best_match) > 2:
-            buttons.append({"type": "postback", "title": "Inne produkty", "payload": f"MORE_PRODUCTS_{user_text}_2"})
-        logger.info(f"📋 Przygotowuję wybór produktów dla '{user_text}' z {len(buttons)} przyciskami, wynik: {best_score}")
-        return [{"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Wybierz produkt, aby zobaczyć opis i dane techniczne:", "buttons": buttons}}}]
-    
-    logger.warning(f"⚠️ Brak produktów do opisania dla '{user_text}'")
-    return [{"text": "⚠️ Brak produktów do opisania."}]
-
-def show_more_products(sender_id, payload):
-    logger.debug(f"📋 Rozpoczynam show_more_products dla payloadu: '{payload}'")
-    parts = payload.split("_")
-    logger.debug(f"Rozdzielony payload: {parts}, liczba części: {len(parts)}")
-    
-    if len(parts) > 3 and parts[0] == "MORE" and parts[1] == "PRODUCTS":
-        parts = ["MORE_PRODUCTS"] + parts[2:]
-        logger.debug(f"Skorygowany payload: {parts}, nowa liczba części: {len(parts)}")
-    
-    if len(parts) != 3 or parts[0] != "MORE_PRODUCTS":
-        logger.error(f"❌ Nieprawidłowy format payloadu: {payload}")
-        return [{"text": "⚠️ Wystąpił błąd. Spróbuj ponownie."}]
-    
-    user_text = parts[1].lower()
-    logger.debug(f"User_text: {user_text}")
     try:
-        start_index = int(parts[2])
-        logger.debug(f"Start_index: {start_index}")
-    except ValueError:
-        logger.error(f"❌ Nieprawidłowy start_index w payloadzie: {payload}")
-        return [{"text": "⚠️ Wystąpił błąd. Spróbuj ponownie."}]
-
-    user_keywords = set(user_text.split())
-    best_match = None
-    best_score = 0
-    
-    for keyword, products in keyword_to_products.items():
-        keyword_lower = keyword.lower()
-        keyword_words = set(keyword_lower.split())
-        common_keywords = user_keywords.intersection(keyword_words)
-        match_ratio = difflib.SequenceMatcher(None, user_text, keyword_lower).ratio()
-        
-        score = len(common_keywords) * 2 + match_ratio
-        if score > best_score and (len(common_keywords) > 0 or match_ratio > 0.5):
-            best_score = score
-            best_match = products
-    
-    if best_match and len(best_match) > start_index:
-        remaining_products = best_match[start_index:]
-        next_products = remaining_products[:2]
-        messages = []
-        response_text = "🛠️ Pozostałe produkty:\n" + "\n".join(
-            [f"• {p}: {products_data.get(p, {}).get('description', 'Szczegóły na ardex.pl')}" for p in next_products]
-        )
-        messages.extend(split_message(response_text))
-        buttons = [{"type": "postback", "title": p[:20], "payload": f"SHOW_PRODUCT_{p}"} for p in next_products]
-        if len(remaining_products) > 2:
-            next_index = start_index + 2
-            buttons.append({"type": "postback", "title": "Inne produkty", "payload": f"MORE_PRODUCTS_{user_text}_{next_index}"})
-        messages.append({"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Wybierz kolejny produkt:", "buttons": buttons}}})
-        logger.info(f"📋 Wysłano kolejne produkty dla '{user_text}' od indeksu {start_index} z wynikiem {best_score}")
-        return messages
-    
-    logger.info(f"ℹ️ Brak dodatkowych produktów dla '{user_text}' od indeksu {start_index}")
-    return [{"text": "ℹ️ Nie ma więcej produktów do pokazania."}]
-
-def show_product_details(sender_id, payload):
-    logger.debug(f"📋 Rozpoczynam show_product_details dla '{payload}'")
-    
-    if payload.startswith("SHOW_PRODUCT_DESCRIPTIONS_"):
-        try:
-            system_id = int(payload.replace("SHOW_PRODUCT_DESCRIPTIONS_", ""))
-            system_data = page_to_intent_products.get(system_id)
-            
-            if not system_data or "products" not in system_data:
-                logger.warning(f"⚠️ Nie znaleziono systemu o ID {system_id}")
-                send_message(sender_id, {"text": f"⚠️ Nie znaleziono systemu {system_id}. Szczegóły na ardex.pl"})
-                return
-            
-            products = system_data["products"]
-            response = f"Opisy produktów dla {system_data['intent']}:\n\n"
-            
-            for product_name in products:
-                product_data = products_data.get(product_name)
-                if product_data:
-                    response += f"**{product_name}**: {product_data['description']}\n\n"
-                else:
-                    response += f"**{product_name}**: Szczegóły na ardex.pl\n\n"
-            
-            for msg in split_message(response.strip()):
-                send_message(sender_id, {"text": msg})
-        
-        except ValueError:
-            logger.warning(f"⚠️ Nieprawidłowy format payloadu: {payload}")
-            send_message(sender_id, {"text": "⚠️ Błąd przetwarzania żądania. Spróbuj ponownie."})
-    elif payload.startswith("SHOW_PRODUCT_"):
-        product_name = payload.replace("SHOW_PRODUCT_", "")
-        product_data = products_data.get(product_name)
-        if product_data:
-            response = f"**{product_name}**\n📝 Opis: {product_data['description']}"
-            dane_techniczne = product_data.get("dane techniczne", {})
-            if dane_techniczne:
-                response += "\n🔧 Dane techniczne:" + "\n".join([f"\n  • {key}: {value}" for key, value in dane_techniczne.items()])
-            else:
-                response += "\n🔧 Brak danych technicznych."
-            for msg in split_message(response, max_length=640):
-                send_message(sender_id, {"text": msg})
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            logger.info(f"✅ Wiadomość wysłana do {sender_id}: {message_text[:50]}...")
         else:
-            send_message(sender_id, {"text": f"⚠️ Brak danych dla {product_name}. Szczegóły na ardex.pl"})
-    else:
-        logger.warning(f"⚠️ Nieobsługiwany payload: {payload}")
-        send_message(sender_id, {"text": f"⚠️ Brak danych dla {payload}. Szczegóły na ardex.pl"})
+            logger.error(f"❌ Błąd wysyłania: {response.status_code}, {response.text}")
+    except Exception as e:
+        logger.error(f"❌ Wyjątek podczas wysyłania wiadomości: {e}")
 
-def describe_system(sender_id, page_num):
-    if page_num not in page_to_intent_products:
-        logger.warning(f"⚠️ System {page_num} nie istnieje")
-        return [{"text": "⚠️ Wybrany system nie istnieje."}]
-    system = page_to_intent_products[page_num]
-    intent_name = system["intent"]
-    image_filename = system["image"]
-    messages = [{"text": f"📋 Wybrany system: {intent_name}"}]
-    image_path = os.path.join("images", image_filename)
-    if os.path.exists(image_path):
-        image_url = f"{SERVER_URL}/images/{image_filename}"
-        logger.debug(f"📷 Przygotowano URL obrazu: {image_url}")
-        messages.append({"attachment": {"type": "image", "payload": {"url": image_url, "is_reusable": True}}})
-    else:
-        logger.warning(f"⚠️ Obraz {image_path} nie istnieje, pomijam wysyłanie")
-        messages.append({"text": f"ℹ️ Obraz dla systemu '{intent_name}' nie jest dostępny."})
-    buttons = [
-        {"type": "postback", "title": "1. Opis produktów", "payload": f"SHOW_PRODUCT_DESCRIPTIONS_{page_num}"},
-        {"type": "postback", "title": "2. Dane techniczne", "payload": f"SHOW_PRODUCT_TECH_DATA_{page_num}"}
-    ]
-    messages.append({"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Co chcesz zobaczyć?", "buttons": buttons}}})
-    logger.info(f"✅ Wysłano system {page_num} z {len(messages)} wiadomościami")
-    return messages
-
-def show_product_tech_data(sender_id, page_num):
-    if page_num not in page_to_intent_products:
-        logger.warning(f"⚠️ System {page_num} nie istnieje")
-        return [{"text": "⚠️ Wybrany system nie istnieje."}]
-    system = page_to_intent_products[page_num]
-    intent_name = system["intent"]
-    products_list = system["products"]
-    messages = [{"text": f"📋 Dane techniczne produktów z systemu: {intent_name}"}]
+def send_image(sender_id, image_url):
+    """Send image to user"""
+    headers = {
+        'Content-Type': 'application/json',
+    }
     
-    # Tworzymy słownik produktów z products_data z normalizacją kluczy (bez spacji, lowercase)
-    normalized_products_data = {k.replace(" ", "").lower(): v for k, v in products_data.items()}
-    
-    for product_name in products_list:
-        # Normalizujemy nazwę produktu do porównania
-        normalized_product_name = product_name.replace(" ", "").lower()
-        product_info = normalized_products_data.get(normalized_product_name, {})
-        dane_techniczne = product_info.get("dane techniczne", {})
-        
-        if dane_techniczne:
-            product_text = f"🛠️ {product_name}\n🔧 Dane techniczne:" + "\n".join([f"\n  • {key}: {value}" for key, value in dane_techniczne.items()])
-        else:
-            product_text = f"🛠️ {product_name}\n🔧 Brak danych technicznych."
-        messages.extend([{"text": msg} for msg in split_message(product_text, max_length=640)])
-    
-    logger.info(f"✅ Wysłano dane techniczne produktów z systemu {page_num} z {len(messages)} wiadomościami")
-    return messages
-
-def upload_image_to_facebook(image_url):
-    """Upload image URL to Facebook and get attachment_id for reusable attachment."""
-    url = f"https://graph.facebook.com/v20.0/me/message_attachments?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
-        "message": {
-            "attachment": {
-                "type": "image",
-                "payload": {
-                    "is_reusable": True,
-                    "url": image_url
+    data = {
+        'recipient': {'id': sender_id},
+        'message': {
+            'attachment': {
+                'type': 'image',
+                'payload': {
+                    'url': image_url,
+                    'is_reusable': True
                 }
             }
         }
     }
+    
+    url = f'https://graph.facebook.com/v12.0/me/messages?access_token={PAGE_ACCESS_TOKEN}'
+    
     try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        attachment_id = data.get("attachment_id")
-        logger.info(f"📤 Załadowano obraz do Facebooka, attachment_id: {attachment_id}")
-        return attachment_id
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Błąd uploadu obrazka do Facebooka: {e}, response: {response.text if response else 'no response'}")
-        return None
-
-
-def send_message(recipient_id, message):
-    url = f"https://graph.facebook.com/v20.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    # Jeśli wysyłasz obraz z URL, najpierw uploadujemy i zamieniamy na attachment_id
-    if "attachment" in message and message["attachment"]["type"] == "image":
-        image_url = message["attachment"]["payload"].get("url")
-        if image_url and not image_url.startswith("http"):
-            image_url = f"{SERVER_URL}/{image_url}"
-        
-        attachment_id = upload_image_to_facebook(image_url)
-        if attachment_id:
-            # Zamień URL na attachment_id
-            message["attachment"]["payload"] = {"attachment_id": attachment_id}
+        logger.info(f"📤 Próba wysłania obrazu: {image_url}")
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            logger.info(f"✅ Obraz wysłany do {sender_id}: {image_url}")
         else:
-            logger.error("❌ Nie udało się załadować obrazka do Facebooka, nie wysyłam wiadomości.")
-            return False
+            logger.error(f"❌ Błąd wysyłania: {response.status_code}, {response.text}")
+    except Exception as e:
+        logger.error(f"❌ Wyjątek podczas wysyłania obrazu: {e}")
 
-    payload = {"recipient": {"id": recipient_id}, "message": message, "messaging_type": "RESPONSE"}
-    logger.debug(f"Wysyłam payload: {json.dumps(payload, ensure_ascii=False)}")
-
+def send_quick_replies(sender_id, message_text, quick_replies):
+    """Send message with quick reply buttons"""
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    
+    quick_reply_list = []
+    for reply in quick_replies:
+        quick_reply_list.append({
+            "content_type": "text",
+            "title": reply[:20],  # Facebook limit
+            "payload": reply
+        })
+    
+    data = {
+        'recipient': {'id': sender_id},
+        'message': {
+            'text': message_text,
+            'quick_replies': quick_reply_list
+        }
+    }
+    
+    url = f'https://graph.facebook.com/v12.0/me/messages?access_token={PAGE_ACCESS_TOKEN}'
+    
     try:
-        response = requests.post(url, json=payload, headers={"Content-Type": "application/json; charset=utf-8"})
-        response.raise_for_status()
-        logger.info(f"✅ Wiadomość wysłana: {json.dumps(message, ensure_ascii=False)}")
-        return True
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Błąd wysyłania: {response.status_code}, {response.text}")
-        return False
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            logger.info(f"✅ Quick replies wysłane do {sender_id}")
+        else:
+            logger.error(f"❌ Błąd wysyłania quick replies: {response.status_code}, {response.text}")
+    except Exception as e:
+        logger.error(f"❌ Wyjątek podczas wysyłania quick replies: {e}")
 
-def cleanup_old_users():
-    now = datetime.now()
-    cutoff_time = now - timedelta(days=30)
-    old_users = [user_id for user_id, timestamp in seen_users.items() if timestamp < cutoff_time]
-    for user_id in old_users:
-        del seen_users[user_id]
-        if user_id in processed_events:
-            del processed_events[user_id]
-    logger.info(f"🧹 Wyczyszczono {len(old_users)} starych użytkowników. Aktualna liczba: {len(seen_users)}")
+def handle_message(sender_id, message_text):
+    """Handle incoming message"""
+    logger.info(f"📨 Otrzymano wiadomość od {sender_id}: {message_text}")
+    
+    # Sprawdź, czy użytkownik już był obsłużony niedawno
+    current_time = time.time()
+    if sender_id in seen_users:
+        last_interaction = seen_users[sender_id]
+        if current_time - last_interaction < 5:  # 5 sekund cooldown
+            logger.info(f"⏳ Cooldown aktywny dla {sender_id}")
+            return
+    
+    seen_users[sender_id] = current_time
+    
+    # Podstawowe komendy
+    if message_text.lower() in ['start', 'pomoc', 'help']:
+        welcome_msg = """🏗️ Witaj! 
+Jestem Twoim asystentem do doboru produktów ARDEX. Mogę pomóc Ci:
 
-@app.route('/webhook', methods=['POST'])
+🔍 Znaleźć odpowiednie produkty
+📋 Dobrać kompletne systemy klejenia
+💡 Udzielić informacji o zastosowaniu
+
+Napisz czego szukasz, np.:
+• "klejenie płytek w łazience"
+• "uszczelnienie basenu" 
+• "wyrównanie posadzki"
+• "jastrych anhydrytowy"
+
+Jak mogę Ci pomóc?"""
+        send_message(sender_id, welcome_msg)
+        return
+    
+    # Szukaj produktów
+    found_products = search_products(sender_id, message_text)
+    if found_products:
+        # Wyślij informacje o produktach
+        product_msg = f"🎯 Znalazłem {len(found_products)} produktów ARDEX:\n\n"
+        for i, product_name in enumerate(found_products, 1):
+            product_info = products_data.get(product_name, {})
+            description = product_info.get("description", "Brak opisu")
+            application = product_info.get("application", "")
+            
+            product_msg += f"{i}. **{product_name}**\n"
+            product_msg += f"   {description[:100]}...\n"
+            if application:
+                product_msg += f"   Zastosowanie: {application[:80]}...\n"
+            product_msg += "\n"
+        
+        # Podziel wiadomość jeśli jest za długa
+        messages = split_message(product_msg)
+        for msg in messages:
+            send_message(sender_id, msg)
+    
+    # Szukaj systemów
+    found_systems = search_systems(sender_id, message_text)
+    if found_systems:
+        system_msg = f"📋 Znalazłem {len(found_systems)} systemów klejenia:\n\n"
+        
+        for i, (page_num, system_intent, score) in enumerate(found_systems, 1):
+            system_data = page_to_intent_products[page_num]
+            system_msg += f"{i}. **{system_data['intent']}**\n"
+            system_msg += f"   Produkty: {', '.join(system_data['products'][:3])}...\n\n"
+        
+        send_message(sender_id, system_msg)
+        
+        # Wyślij obrazy systemów
+        for page_num, system_intent, score in found_systems:
+            system_data = page_to_intent_products[page_num]
+            image_filename = system_data.get("image")
+            if image_filename:
+                image_url = f"{SERVER_URL}/images/{image_filename}"
+                send_image(sender_id, image_url)
+                time.sleep(1)  # Delay between images
+    
+    # Jeśli nic nie znaleziono
+    if not found_products and not found_systems:
+        send_message(sender_id, """🤔 Nie znalazłem produktów dla Twojego zapytania.
+Spróbuj być bardziej konkretny, np.:
+• "kleje do płytek"
+• "uszczelnienie łazienki"
+• "wyrównanie podłogi"
+• "gruntowanie betonu"
+
+Mogę też pomóc z konkretnymi nazwami produktów ARDEX.""")
+
+@app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
-    data = request.get_json()
-    if not data or data.get("object") != "page":
-        logger.debug("📩 [Webhook] Brak danych lub nie jest to strona")
-        return "OK", 200
+    if request.method == 'GET':
+        # Verify webhook
+        verify_token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+        
+        if verify_token == VERIFY_TOKEN:
+            logger.info("✅ Webhook zweryfikowany")
+            return challenge
+        else:
+            logger.error("❌ Nieprawidłowy verify token")
+            return 'Error', 403
     
-    logger.debug(f"📩 [Webhook] Otrzymano dane: {json.dumps(data, indent=2, ensure_ascii=False)}")
-    
-    for entry in data.get("entry", []):
-        for messaging_event in entry.get("messaging", []):
-            sender_id = messaging_event["sender"]["id"]
-            page_id = messaging_event["recipient"]["id"]
-            timestamp = messaging_event.get("timestamp", 0)
-            event_id = f"{sender_id}_{timestamp}"
+    elif request.method == 'POST':
+        # Handle incoming messages
+        data = request.get_json()
+        logger.debug(f"📨 Otrzymano webhook: {json.dumps(data, indent=2)}")
+        
+        if 'entry' in data:
+            for entry in data['entry']:
+                if 'messaging' in entry:
+                    for messaging_event in entry['messaging']:
+                        event_id = messaging_event.get('message', {}).get('mid', 'unknown')
+                        
+                        # Sprawdź, czy event nie był już przetwarzany
+                        if event_id in processed_events:
+                            logger.debug(f"Event {event_id} już przetworzony, pomijam")
+                            continue
+                        
+                        processed_events[event_id] = time.time()
+                        
+                        # Wyczyść stare eventy (starsze niż 1 godzina)
+                        current_time = time.time()
+                        old_events = {k: v for k, v in processed_events.items() 
+                                    if current_time - v < 3600}
+                        processed_events.clear()
+                        processed_events.update(old_events)
+                        
+                        sender_id = messaging_event['sender']['id']
+                        
+                        if 'message' in messaging_event:
+                            message = messaging_event['message']
+                            if 'text' in message:
+                                message_text = message['text']
+                                handle_message(sender_id, message_text)
+        
+        return 'OK', 200
 
-            # Ignoruj wiadomości zwrotne (echo) od bota
-            if "message" in messaging_event and messaging_event["message"].get("is_echo"):
-                logger.debug(f"📣 Ignoruję echo bota: {event_id}")
-                continue
+    return 'Method not allowed', 405
 
-            # Sprawdzanie duplikatów
-            if sender_id not in processed_events:
-                processed_events[sender_id] = set()
-            if event_id in processed_events[sender_id]:
-                logger.info(f"📣 [Webhook] Ignoruję duplikat: {event_id}")
-                continue
-            processed_events[sender_id].add(event_id)
-            logger.info(f"👤 [Webhook] Sender ID: {sender_id}")
-
-            # Powitanie dla nowych użytkowników
-            if sender_id not in seen_users:
-                welcome_message = {"text": "👋 Cześć! Jestem botem ARDEX. Wpisz, czego szukasz."}
-                send_message(sender_id, welcome_message)
-                seen_users[sender_id] = datetime.now()
-            else:
-                seen_users[sender_id] = datetime.now()
-
-            # Obsługa wiadomości tekstowych
-            if "message" in messaging_event and "text" in messaging_event["message"]:
-                user_text = messaging_event["message"]["text"]
-                logger.info(f"📨 [Webhook] Wiadomość: {user_text}")
-                send_message(sender_id, {"text": "🔍 Szukam dla Ciebie..."})
-                
-                # Najpierw zawsze pokazujemy produkty
-                product_messages = search_products(sender_id, user_text)
-                for message in product_messages:
-                    send_message(sender_id, message)
-
-            # Obsługa postbacków
-            elif "postback" in messaging_event:
-                payload = messaging_event["postback"]["payload"]
-                logger.info(f"📩 [Webhook] Postback: {payload}")
-                
-                if payload.startswith("SHOW_SYSTEMS_"):
-                    user_text = payload.replace("SHOW_SYSTEMS_", "")
-                    system_messages = search_systems(sender_id, user_text)
-                    if system_messages:
-                        for message in system_messages:
-                            send_message(sender_id, message)
-                    else:
-                        send_message(sender_id, {"text": "⚠️ Nie znalazłem systemów pasujących do tych produktów. Spróbuj inaczej!"})
-                
-                elif payload.startswith("DESCRIBE_PRODUCT_"):
-                    user_text = payload.replace("DESCRIBE_PRODUCT_", "")
-                    messages = describe_product(sender_id, user_text)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
-                elif payload.startswith("SELECT_SYSTEM_"):
-                    page_num = int(payload.replace("SELECT_SYSTEM_", ""))
-                    messages = describe_system(sender_id, page_num)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
-                elif payload.startswith("SHOW_PRODUCT_TECH_DATA_"):
-                    page_num = int(payload.replace("SHOW_PRODUCT_TECH_DATA_", ""))
-                    messages = show_product_tech_data(sender_id, page_num)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
-                elif payload.startswith("SHOW_PRODUCT_") or payload.startswith("SHOW_PRODUCT_DESCRIPTIONS_"):
-                    show_product_details(sender_id, payload)
-                
-                elif payload.startswith("MORE_PRODUCTS_"):
-                    messages = show_more_products(sender_id, payload)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
-                elif payload.startswith("SHOW_PRODUCTS_"):
-                    user_text = payload.replace("SHOW_PRODUCTS_", "")
-                    product_messages = search_products(sender_id, user_text)
-                    if product_messages:
-                        for message in product_messages:
-                            send_message(sender_id, message)
-                    else:
-                        send_message(sender_id, {"text": "⚠️ Nie znalazłem produktów pasujących do tego zapytania. Spróbuj inaczej!"})
-
-    cleanup_old_users()
-    return "OK", 200
-
-@app.route('/webhook', methods=['GET'])
-def verify():
-    if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == VERIFY_TOKEN:
-        logger.info("✔️ Weryfikacja webhooka powiodła się")
-        return request.args.get("hub.challenge"), 200
-    logger.warning("❌ Weryfikacja webhooka nie powiodła się")
-    return "Verification failed", 403
-
-if __name__ == "__main__":
-    os.makedirs("images", exist_ok=True)
-    port_env = os.environ.get("PORT")
-    if not port_env:
-        logger.error("🛑 Nie znaleziono zmiennej środowiskowej PORT")
-        exit(1)
-    port = int(port_env)
-    logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+if __name__ == '__main__':
+    logger.info("🚀 Uruchamianie aplikacji Flask...")
+    app.run(host='0.0.0.0', port=5000, debug=True)
