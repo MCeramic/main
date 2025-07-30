@@ -550,9 +550,8 @@ def verify():
     logger.warning("❌ Weryfikacja webhooka nie powiodła się")
     return "Verification failed", 403
 
-#if __name__ == "__main__":
-  #  os.makedirs("images", exist_ok=True)
-    # Updated for Render deployment
-  #  port = int(os.environ.get("PORT", 5001))
-  #  logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
-  #  app.run(host="0.0.0.0", port=port, debug=False)
+if __name__ == "__main__":
+    os.makedirs("images", exist_ok=True)
+    port = int(os.environ.get("PORT", 5001))
+    logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
