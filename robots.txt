@@ -1,2 +1,8 @@
+User-agent: facebookexternalhit
+Allow: /images/
+
+User-agent: facebot
+Allow: /images/
+
 User-agent: *
 Allow: /
