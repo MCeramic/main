@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-# ngrok http 5001
-# cd C:\Users\Weronika\Desktop\Anna\bot\project\facebook
-# python -m venv venv
-# .\venv\Scripts\activate
-# python bot.py
+# Updated for Render deployment
+# Remove ngrok setup and use static Render URL
 
 import json
 import os
@@ -38,36 +35,9 @@ VERIFY_TOKEN = "mceramic"
 
 app = Flask(__name__)
 
-# Fetch ngrok URL
-def get_ngrok_url(max_attempts=5, delay=2):
-    attempt = 0
-    while attempt < max_attempts:
-        try:
-            logger.info(f"Próba {attempt + 1}/{max_attempts}: Łączenie z http://localhost:4040/api/tunnels")
-            response = requests.get("http://localhost:4040/api/tunnels", timeout=5)
-            logger.info(f"Odpowiedź HTTP: {response.status_code}")
-            data = response.json()
-            logger.debug(f"Dane JSON: {json.dumps(data, indent=2)}")
-            for tunnel in data["tunnels"]:
-                if tunnel["proto"] == "https":
-                    return tunnel["public_url"]
-            if data["tunnels"]:
-                return data["tunnels"][0]["public_url"]
-            return None
-        except Exception as e:
-            logger.error(f"❌ Próba {attempt + 1}/{max_attempts} - Błąd: {e}")
-            attempt += 1
-            if attempt < max_attempts:
-                time.sleep(delay)
-    logger.warning("⚠️ Nie udało się połączyć z ngrok po wszystkich próbach.")
-    return None
-
-SERVER_URL = get_ngrok_url()
-if SERVER_URL:
-    logger.info(f"🖧 Wykryto ngrok URL: {SERVER_URL}")
-else:
-    SERVER_URL = "http://localhost:5001"
-    logger.warning(f"⚠️ Nie znaleziono ngrok URL, używam: {SERVER_URL}")
+# Static server URL for Render
+SERVER_URL = "https://main-owe4.onrender.com"
+logger.info(f"🖧 Using static server URL: {SERVER_URL}")
 
 @app.route('/')
 def test():
@@ -577,5 +547,7 @@ def verify():
 
 if __name__ == "__main__":
     os.makedirs("images", exist_ok=True)
-    logger.info("🚀 Uruchamiam Flask na http://0.0.0.0:5001")
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    # Updated for Render deployment
+    port = int(os.environ.get("PORT", 5001))
+    logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
