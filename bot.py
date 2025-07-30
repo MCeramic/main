@@ -555,6 +555,6 @@ def verify():
 
 if __name__ == "__main__":
     os.makedirs("images", exist_ok=True)
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5001))
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
