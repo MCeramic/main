@@ -49,6 +49,11 @@ def serve_image(path):
     logger.info(f"📷 Żądanie obrazu: {path}")
     return send_from_directory('images', path)
 
+@app.route('/robots.txt')
+def robots():
+    content = os.getenv('ROBOTS_TXT_CONTENT', "User-agent: *\nAllow: /")
+    return Response(content, mimetype='text/plain')
+
 # Systems and products data
 page_to_intent_products = {
     2: {"intent": "SYSTEM KLEJENIA ŁAZIENEK Umiarkowane obciążenie wilgocią. Uszczelnienie zespolone", "products": ["ARDEX AM 100", "ARDEX 8+9", "ARDEX SK 12", "ARDEX X 7 G PLUS", "ARDEX G 10 PREMIUM", "ARDEX SE"], "image": "system_lazienkowy_umiarkowane_obciazenie_wilgocia_uszczelnienie_zespolone.png"},
