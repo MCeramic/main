@@ -415,16 +415,51 @@ def show_product_tech_data(sender_id, page_num):
     logger.info(f"✅ Wysłano dane techniczne produktów z systemu {page_num} z {len(messages)} wiadomościami")
     return messages
 
+def upload_image_to_facebook(image_url):
+    """Upload image URL to Facebook and get attachment_id for reusable attachment."""
+    url = f"https://graph.facebook.com/v20.0/me/message_attachments?access_token={PAGE_ACCESS_TOKEN}"
+    payload = {
+        "message": {
+            "attachment": {
+                "type": "image",
+                "payload": {
+                    "is_reusable": True,
+                    "url": image_url
+                }
+            }
+        }
+    }
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        attachment_id = data.get("attachment_id")
+        logger.info(f"📤 Załadowano obraz do Facebooka, attachment_id: {attachment_id}")
+        return attachment_id
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Błąd uploadu obrazka do Facebooka: {e}, response: {response.text if response else 'no response'}")
+        return None
+
+
 def send_message(recipient_id, message):
     url = f"https://graph.facebook.com/v20.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+    # Jeśli wysyłasz obraz z URL, najpierw uploadujemy i zamieniamy na attachment_id
     if "attachment" in message and message["attachment"]["type"] == "image":
-        image_url = message["attachment"]["payload"]["url"]
-        if not image_url.startswith("http"):
+        image_url = message["attachment"]["payload"].get("url")
+        if image_url and not image_url.startswith("http"):
             image_url = f"{SERVER_URL}/{image_url}"
-        message["attachment"]["payload"]["url"] = image_url
-        logger.debug(f"📷 Wysyłanie obrazu: {image_url}")
+        
+        attachment_id = upload_image_to_facebook(image_url)
+        if attachment_id:
+            # Zamień URL na attachment_id
+            message["attachment"]["payload"] = {"attachment_id": attachment_id}
+        else:
+            logger.error("❌ Nie udało się załadować obrazka do Facebooka, nie wysyłam wiadomości.")
+            return False
+
     payload = {"recipient": {"id": recipient_id}, "message": message, "messaging_type": "RESPONSE"}
     logger.debug(f"Wysyłam payload: {json.dumps(payload, ensure_ascii=False)}")
+
     try:
         response = requests.post(url, json=payload, headers={"Content-Type": "application/json; charset=utf-8"})
         response.raise_for_status()
