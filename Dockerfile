@@ -1,13 +1,13 @@
-# Użyj lekkiego obrazu z Pythona 3.11
+# Lekka baza z Pythonem 3.11
 FROM python:3.11.11-slim
 
-# Ustaw katalog roboczy
+# Katalog roboczy
 WORKDIR /app
 
-# Skopiuj plik z zależnościami
+# Kopiuj plik zależności
 COPY requirements.txt .
 
-# Zainstaluj potrzebne biblioteki systemowe (dla zależności pip)
+# Instaluj zależności systemowe wymagane przez niektóre pakiety (np. faiss, torch)
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
@@ -24,18 +24,18 @@ RUN apt-get update && apt-get install -y \
     gfortran \
     && rm -rf /var/lib/apt/lists/*
 
-# Zainstaluj zależności Pythona
+# Instalacja pip + paczki
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-# Skopiuj resztę plików projektu
+# Skopiuj cały kod źródłowy
 COPY . .
 
-# Upewnij się, że folder z obrazami istnieje
+# Tworzymy folder na obrazy, jeśli nie istnieje
 RUN mkdir -p images
 
-# Render wymaga nasłuchiwania na porcie przekazanym przez zmienną środowiskową $PORT
+# Render automatycznie przekazuje zmienną środowiskową $PORT
 EXPOSE 10000
 
-# Uruchom Gunicorn, używając zmiennej środowiskowej PORT
+# Uruchom Gunicorn na zmiennym porcie (Render ustawi $PORT)
 CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "bot:app"]
