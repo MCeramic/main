@@ -51,15 +51,9 @@ def serve_image(path):
 
 @app.route('/robots.txt')
 def robots():
-    logger.info("📄 robots.txt został pobrany")
-    content = """User-agent: facebookexternalhit
+    logger.info("📄 robots.txt będzie zwrócony")
+    content = """User-agent: *
 Allow: /images/
-
-User-agent: facebot
-Allow: /images/
-
-User-agent: *
-Allow: /
 """
     return Response(content, mimetype='text/plain')
 
