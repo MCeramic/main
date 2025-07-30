@@ -51,7 +51,16 @@ def serve_image(path):
 
 @app.route('/robots.txt')
 def robots():
-    content = os.getenv('ROBOTS_TXT_CONTENT', "User-agent: *\nAllow: /")
+    logger.info("📄 robots.txt został pobrany")
+    content = """User-agent: facebookexternalhit
+Allow: /images/
+
+User-agent: facebot
+Allow: /images/
+
+User-agent: *
+Allow: /
+"""
     return Response(content, mimetype='text/plain')
 
 # Systems and products data
@@ -552,6 +561,6 @@ def verify():
 
 if __name__ == "__main__":
     os.makedirs("images", exist_ok=True)
-    port = int(os.environ.get("PORT", 5001))
+    port = int(os.environ.get("PORT", 10000))
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
