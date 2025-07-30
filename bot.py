@@ -418,16 +418,18 @@ def show_product_tech_data(sender_id, page_num):
 def send_message(recipient_id, message):
     url = f"https://graph.facebook.com/v20.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     
-    # Zamień załączniki obrazów na linki tekstowe
+    # Dla obrazów - wysyłaj bezpośrednio URL (bez uploadu)
     if "attachment" in message and message["attachment"]["type"] == "image":
         image_url = message["attachment"]["payload"].get("url")
         if image_url and not image_url.startswith("http"):
             image_url = f"{SERVER_URL}/{image_url}"
         
-        # Zamiast wysyłać jako załącznik, wyślij jako link tekstowy
-        text_message = {"text": f"📷 Schemat systemu: {image_url}"}
-        logger.info(f"📷 Przekształcam obraz na link tekstowy: {image_url}")
-        return send_message(recipient_id, text_message)
+        # Aktualizuj URL w wiadomości
+        message["attachment"]["payload"]["url"] = image_url
+        # Usuń is_reusable - może powodować problemy
+        message["attachment"]["payload"].pop("is_reusable", None)
+        
+        logger.info(f"📷 Wysyłam obraz bezpośrednio: {image_url}")
     
     payload = {"recipient": {"id": recipient_id}, "message": message, "messaging_type": "RESPONSE"}
     logger.debug(f"Wysyłam payload: {json.dumps(payload, ensure_ascii=False)}")
@@ -438,8 +440,110 @@ def send_message(recipient_id, message):
         logger.info(f"✅ Wiadomość wysłana: {json.dumps(message, ensure_ascii=False)}")
         return True
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Błąd wysyłania: {getattr(response, 'status_code', 'brak kodu')}, {getattr(response, 'text', str(e))}")
+        logger.error(f"❌ Błąd wysyłania: {getattr(response, 'status_code', 'brak kodu')}")
+        logger.error(f"❌ Response: {getattr(response, 'text', str(e))}")
+        
+        # Fallback - wyślij jako link tekstowy jeśli obraz się nie uda
+        if "attachment" in message and message["attachment"]["type"] == "image":
+            fallback_url = message["attachment"]["payload"]["url"]
+            fallback_message = {"text": f"📷 Schemat systemu: {fallback_url}"}
+            logger.info("📷 Używam fallback - wysyłam jako link tekstowy")
+            return send_message(recipient_id, fallback_message)
         return False
+
+# USUŃ całkowicie funkcję upload_image_to_facebook
+# def upload_image_to_facebook(image_url):  # <- USUŃ TĘ FUNKCJĘ
+
+def describe_system(sender_id, page_num):
+    if page_num not in page_to_intent_products:
+        logger.warning(f"⚠️ System {page_num} nie istnieje")
+        return [{"text": "⚠️ Wybrany system nie istnieje."}]
+    
+    system = page_to_intent_products[page_num]
+    intent_name = system["intent"]
+    image_filename = system["image"]
+    
+    messages = [{"text": f"📋 Wybrany system: {intent_name}"}]
+    
+    # Sprawdź czy obraz istnieje lokalnie
+    image_path = os.path.join("images", image_filename)
+    if os.path.exists(image_path):
+        image_url = f"{SERVER_URL}/images/{image_filename}"
+        logger.debug(f"📷 Przygotowano URL obrazu: {image_url}")
+        
+        # Dodaj wiadomość z obrazem (bez is_reusable)
+        messages.append({
+            "attachment": {
+                "type": "image",
+                "payload": {
+                    "url": image_url
+                }
+            }
+        })
+    else:
+        logger.warning(f"⚠️ Obraz {image_path} nie istnieje")
+        messages.append({"text": f"ℹ️ Schemat dla systemu '{intent_name}' będzie dostępny wkrótce."})
+    
+    # Dodaj przyciski
+    buttons = [
+        {"type": "postback", "title": "1. Opis produktów", "payload": f"SHOW_PRODUCT_DESCRIPTIONS_{page_num}"},
+        {"type": "postback", "title": "2. Dane techniczne", "payload": f"SHOW_PRODUCT_TECH_DATA_{page_num}"}
+    ]
+    messages.append({
+        "attachment": {
+            "type": "template",
+            "payload": {
+                "template_type": "button",
+                "text": "📋 Co chcesz zobaczyć?",
+                "buttons": buttons
+            }
+        }
+    })
+    
+    logger.info(f"✅ Przygotowano system {page_num} z {len(messages)} wiadomościami")
+    return messages
+
+@app.route('/test-images')
+def test_images():
+    results = []
+    for page_num, system_data in page_to_intent_products.items():
+        image_filename = system_data["image"]
+        image_path = os.path.join("images", image_filename)
+        image_url = f"{SERVER_URL}/images/{image_filename}"
+        
+        exists_locally = os.path.exists(image_path)
+        
+        # Test HTTP dostępności
+        try:
+            response = requests.head(image_url, timeout=5)
+            http_available = response.status_code == 200
+        except:
+            http_available = False
+        
+        results.append({
+            "page": page_num,
+            "filename": image_filename,
+            "local_exists": exists_locally,
+            "http_available": http_available,
+            "url": image_url
+        })
+    
+    return {"images": results}
+
+# Dodaj też prosty test pojedynczego obrazu
+@app.route('/test-single-image')
+def test_single_image():
+    # Test pierwszego dostępnego obrazu
+    test_image = "system_lazienkowy_umiarkowane_obciazenie_wilgocia_uszczelnienie_zespolone.png"
+    image_url = f"{SERVER_URL}/images/{test_image}"
+    
+    return f'''
+    <h2>Test obrazu:</h2>
+    <p>URL: {image_url}</p>
+    <img src="{image_url}" style="max-width: 500px;" onerror="this.style.display='none'; this.nextSibling.style.display='block';">
+    <p style="display:none; color:red;">❌ Obraz nie może być załadowany</p>
+    '''
+
 def cleanup_old_users():
     now = datetime.now()
     cutoff_time = now - timedelta(days=30)
