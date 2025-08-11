@@ -503,9 +503,6 @@ def send_message(recipient_id, message):
             return send_message(recipient_id, fallback_message)
         return False
 
-# USUŃ całkowicie funkcję upload_image_to_facebook
-# def upload_image_to_facebook(image_url):  # <- USUŃ TĘ FUNKCJĘ
-
 def describe_system(sender_id, page_num):
     if page_num not in page_to_intent_products:
         logger.warning(f"⚠️ System {page_num} nie istnieje")
@@ -576,9 +573,16 @@ def debug_data_structures():
     
     logger.info("=== END DEBUG ===")
 
-# Call this function at startup or when you want to debug
-# debug_data_structures()
-
+def cleanup_old_users():
+    now = datetime.now()
+    cutoff_time = now - timedelta(days=30)
+    old_users = [user_id for user_id, timestamp in seen_users.items() if timestamp < cutoff_time]
+    for user_id in old_users:
+        del seen_users[user_id]
+        if user_id in processed_events:
+            del processed_events[user_id]
+    logger.info(f"🧹 Wyczyszczono {len(old_users)} starych użytkowników. Aktualna liczba: {len(seen_users)}")
+    
 @app.route('/test-images')
 def test_images():
     results = []
@@ -620,33 +624,22 @@ def test_single_image():
     <p style="display:none; color:red;">❌ Obraz nie może być załadowany</p>
     '''
 
-def cleanup_old_users():
-    now = datetime.now()
-    cutoff_time = now - timedelta(days=30)
-    old_users = [user_id for user_id, timestamp in seen_users.items() if timestamp < cutoff_time]
-    for user_id in old_users:
-        del seen_users[user_id]
-        if user_id in processed_events:
-            del processed_events[user_id]
-    logger.info(f"🧹 Wyczyszczono {len(old_users)} starych użytkowników. Aktualna liczba: {len(seen_users)}")
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
     if not data or data.get("object") != "page":
         logger.debug("📩 [Webhook] Brak danych lub nie jest to strona")
         return "OK", 200
-    
+
     logger.debug(f"📩 [Webhook] Otrzymano dane: {json.dumps(data, indent=2, ensure_ascii=False)}")
-    
+
     for entry in data.get("entry", []):
         for messaging_event in entry.get("messaging", []):
             sender_id = messaging_event["sender"]["id"]
-            page_id = messaging_event["recipient"]["id"]
             timestamp = messaging_event.get("timestamp", 0)
             event_id = f"{sender_id}_{timestamp}"
 
-            # Ignoruj wiadomości zwrotne (echo) od bota
+            # Ignoruj echo bota
             if "message" in messaging_event and messaging_event["message"].get("is_echo"):
                 logger.debug(f"📣 Ignoruję echo bota: {event_id}")
                 continue
@@ -658,23 +651,21 @@ def webhook():
                 logger.info(f"📣 [Webhook] Ignoruję duplikat: {event_id}")
                 continue
             processed_events[sender_id].add(event_id)
+
             logger.info(f"👤 [Webhook] Sender ID: {sender_id}")
 
-            # Powitanie dla nowych użytkowników
+            # Powitanie nowych użytkowników
             if sender_id not in seen_users:
                 welcome_message = {"text": "👋 Cześć! Jestem botem ARDEX. Wpisz, czego szukasz."}
                 send_message(sender_id, welcome_message)
-                seen_users[sender_id] = datetime.now()
-            else:
-                seen_users[sender_id] = datetime.now()
+            seen_users[sender_id] = datetime.now()
 
             # Obsługa wiadomości tekstowych
             if "message" in messaging_event and "text" in messaging_event["message"]:
                 user_text = messaging_event["message"]["text"]
                 logger.info(f"📨 [Webhook] Wiadomość: {user_text}")
                 send_message(sender_id, {"text": "🔍 Szukam dla Ciebie..."})
-                
-                # Najpierw zawsze pokazujemy produkty
+
                 product_messages = search_products(sender_id, user_text)
                 for message in product_messages:
                     send_message(sender_id, message)
@@ -683,42 +674,63 @@ def webhook():
             elif "postback" in messaging_event:
                 payload = messaging_event["postback"]["payload"]
                 logger.info(f"📩 [Webhook] Postback: {payload}")
-                
-                if payload.startswith("SHOW_SYSTEMS_"):
-                    user_text = payload.replace("SHOW_SYSTEMS_", "")
-                    system_messages = search_systems(sender_id, user_text)
-                    if system_messages:
-                        for message in system_messages:
-                            send_message(sender_id, message)
+
+                if payload.startswith("DESCRIBE_PRODUCT_"):
+                    product_id = payload.replace("DESCRIBE_PRODUCT_", "")
+                    messages = describe_product(sender_id, product_id)
+                    for message in messages:
+                        send_message(sender_id, message)
+
+                elif payload.startswith("MORE_PRODUCTS_") or payload.startswith("SHOW_MORE_PRODUCTS_"):
+                    normalized_payload = payload.replace("SHOW_MORE_PRODUCTS_", "MORE_PRODUCTS_")
+                    messages = show_more_products(sender_id, normalized_payload)
+                    for message in messages:
+                        send_message(sender_id, message)
+
+                elif payload.startswith("SHOW_PRODUCT_") or payload.startswith("SHOW_PRODUCT_DESCRIPTIONS_") or payload.startswith("SHOW_PRODUCT_TECH_DATA_"):
+                    show_product_details(sender_id, payload)
+
+                elif payload == "SHOW_SYSTEMS":
+                    buttons = []
+                    for page_num, system_data in page_to_intent_products.items():
+                        title = system_data.get("intent", f"System {page_num}")
+                        buttons.append({
+                            "type": "postback",
+                            "title": title[:20],
+                            "payload": f"SELECT_SYSTEM_{page_num}"
+                        })
+                        if len(buttons) >= 10:
+                            break
+                    if buttons:
+                        message = {
+                            "attachment": {
+                                "type": "template",
+                                "payload": {
+                                    "template_type": "button",
+                                    "text": "📋 Wybierz system:",
+                                    "buttons": buttons
+                                }
+                            }
+                        }
+                        send_message(sender_id, message)
                     else:
-                        send_message(sender_id, {"text": "⚠️ Nie znalazłem systemów pasujących do tych produktów. Spróbuj inaczej!"})
-                
-                elif payload.startswith("DESCRIBE_PRODUCT_"):
-                    user_text = payload.replace("DESCRIBE_PRODUCT_", "")
-                    messages = describe_product(sender_id, user_text)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
+                        send_message(sender_id, {"text": "⚠️ Brak dostępnych systemów."})
+
                 elif payload.startswith("SELECT_SYSTEM_"):
-                    page_num = int(payload.replace("SELECT_SYSTEM_", ""))
-                    messages = describe_system(sender_id, page_num)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
+                    try:
+                        page_num = int(payload.replace("SELECT_SYSTEM_", ""))
+                        messages = describe_system(sender_id, page_num)
+                        for message in messages:
+                            send_message(sender_id, message)
+                    except ValueError:
+                        send_message(sender_id, {"text": "⚠️ Nieprawidłowy identyfikator systemu."})
+
                 elif payload.startswith("SHOW_PRODUCT_TECH_DATA_"):
                     page_num = int(payload.replace("SHOW_PRODUCT_TECH_DATA_", ""))
                     messages = show_product_tech_data(sender_id, page_num)
                     for message in messages:
                         send_message(sender_id, message)
-                
-                elif payload.startswith("SHOW_PRODUCT_") or payload.startswith("SHOW_PRODUCT_DESCRIPTIONS_"):
-                    show_product_details(sender_id, payload)
-                
-                elif payload.startswith("MORE_PRODUCTS_"):
-                    messages = show_more_products(sender_id, payload)
-                    for message in messages:
-                        send_message(sender_id, message)
-                
+
                 elif payload.startswith("SHOW_PRODUCTS_"):
                     user_text = payload.replace("SHOW_PRODUCTS_", "")
                     product_messages = search_products(sender_id, user_text)
@@ -728,9 +740,14 @@ def webhook():
                     else:
                         send_message(sender_id, {"text": "⚠️ Nie znalazłem produktów pasujących do tego zapytania. Spróbuj inaczej!"})
 
+                else:
+                    logger.warning(f"Nieobsługiwany payload postbacku: {payload}")
+                    send_message(sender_id, {"text": f"⚠️ Nieznany postback: {payload}"})
+
     cleanup_old_users()
     return "OK", 200
 
+# Endpoint do weryfikacji webhooka Facebooka
 @app.route('/webhook', methods=['GET'])
 def verify():
     if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == VERIFY_TOKEN:
@@ -748,6 +765,7 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
