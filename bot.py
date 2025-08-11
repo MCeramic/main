@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
-# Updated for Render deployment
-# Remove ngrok setup and use static Render URL
-
-import json
 import os
-import requests
-import time
+import json
 import logging
+import requests
 from flask import Flask, request, send_from_directory, Response
-import difflib
 from datetime import datetime, timedelta
+from threading import Thread
+import time
 
-# Configure logging to file and console
+# Logger
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -22,7 +19,7 @@ console = logging.StreamHandler()
 console.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 console.setFormatter(formatter)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 logger.addHandler(console)
 
 # Dictionaries for tracking users and processed events
@@ -39,23 +36,38 @@ app = Flask(__name__)
 SERVER_URL = "https://main-owe4.onrender.com"
 logger.info(f"🖧 Using static server URL: {SERVER_URL}")
 
-@app.route('/')
+# --- Webhook routes ---
+@app.route('/', methods=['GET'])
 def test():
-    logger.info("📡 Otrzymano żądanie na /")
+    logger.info("Received GET on /")
     return "Flask działa!", 200
 
-@app.route('/images/<path:path>')
-def serve_image(path):
-    logger.info(f"📷 Żądanie obrazu: {path}")
-    return send_from_directory('images', path)
+@app.route('/images/<path:filename>')
+def serve_image(filename):
+    logger.info(f"Serving image: {filename}")
+    response = send_from_directory('images', filename)
+    response.headers['Cache-Control'] = 'public, max-age=86400'  # 1 day caching
+    return response
 
 @app.route('/robots.txt')
 def robots():
-    logger.info("📄 robots.txt będzie zwrócony")
+    logger.info("Serving robots.txt")
     content = """User-agent: *
 Allow: /images/
 """
     return Response(content, mimetype='text/plain')
+
+@app.route('/webhook', methods=['GET'])
+def verify():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        logger.info("Webhook verified successfully")
+        return challenge, 200
+    else:
+        logger.warning("Webhook verification failed")
+        return "Verification failed", 403
 
 # Systems and products data
 page_to_intent_products = {
@@ -755,9 +767,23 @@ def verify():
         return request.args.get("hub.challenge"), 200
     logger.warning("❌ Weryfikacja webhooka nie powiodła się")
     return "Verification failed", 403
+    
+ #--- Keep-alive thread to ping self to avoid idling on Render ---
+def keep_alive():
+    while True:
+        try:
+            logger.info("Keep-alive pinging...")
+            r = requests.get(SERVER_URL)
+            logger.info(f"Keep-alive response: {r.status_code}")
+        except Exception as e:
+            logger.error(f"Keep-alive error: {e}")
+        time.sleep(60 * 10)  # ping co 10 minut
 
 if __name__ == "__main__":
-    os.makedirs("images", exist_ok=True)
+    # Start keep-alive in background
+    thread = Thread(target=keep_alive)
+    thread.daemon = True
+    thread.start()
     port_env = os.environ.get("PORT")
     if not port_env:
         logger.error("🛑 Nie znaleziono zmiennej środowiskowej PORT")
@@ -765,9 +791,3 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
-
-
-
-
