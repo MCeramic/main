@@ -147,113 +147,131 @@ def split_message(text, max_length=1900):
     return messages
 
 # Improved system search with better filtering and debugging
-def search_systems(sender_id, user_text):
-    user_text = user_text.lower()
-    if user_text.startswith("⚠️"):
-        logger.debug(f"Skipped processing error message: {user_text}")
+def normalize_text(text):
+    return text.lower().replace(" ", "")
+
+def simple_stem(word):
+    endings = ["ach", "ami", "owi", "em", "ie", "a", "u", "y", "i", "om", "ę", "ą", "e"]
+    for end in endings:
+        if word.endswith(end) and len(word) > len(end) + 2:
+            return word[:-len(end)]
+    return word
+
+def search_products(sender_id, user_text, return_products_only=False):
+    user_text_orig = user_text
+    user_text_lower = user_text.lower()
+    if user_text_lower.startswith("⚠️"):
+        logger.debug(f"Skipped processing error message: {user_text_lower}")
         return None
-    
-    # Pobieramy listę wcześniej znalezionych produktów
-    found_products = search_products(sender_id, user_text, return_products_only=True)
-    if not found_products:
-        logger.warning(f"⚠️ Nie znaleziono produktów dla '{user_text}', więc brak systemów")
-        return None
-    
-    logger.debug(f"🔍 Znalezione produkty: {found_products}")
-    
-    # Normalizujemy znalezione produkty (usuń spacje, lowercase)
-    normalized_found_products = set()
-    for product in found_products:
-        normalized_product = product.replace(" ", "").lower()
-        normalized_found_products.add(normalized_product)
-    
-    logger.debug(f"🔍 Znormalizowane produkty: {normalized_found_products}")
-    
-    # Szukamy systemów zawierających te produkty
-    matching_systems = []
+
+    # Tokenizacja + pseudo-lematyzacja
+    user_tokens = [simple_stem(t) for t in user_text_lower.split()]
+    normalized_user = normalize_text(user_text_lower)
+
+    exact_matches = set()
+    fuzzy_matches = set()
+
+    # 1. Szukanie w keyword_to_products
+    for keyword, products in keyword_to_products.items():
+        keyword_norm = normalize_text(keyword)
+        keyword_tokens = [simple_stem(t) for t in keyword.lower().split()]
+        match_ratio = difflib.SequenceMatcher(None, normalized_user, keyword_norm).ratio()
+
+        if normalized_user == keyword_norm or any(t in keyword_tokens for t in user_tokens):
+            exact_matches.update(products)
+            logger.debug(f"Exact keyword match: '{keyword}'")
+        elif match_ratio > 0.65 or any(t in keyword_norm for t in user_tokens):
+            fuzzy_matches.update(products)
+            logger.debug(f"Fuzzy keyword match: '{keyword}' ({match_ratio:.2f})")
+
+    # 2. Szukanie w systemach (po nazwie systemu)
     for page_num, system_data in page_to_intent_products.items():
-        system_intent = system_data["intent"].lower()
-        system_products = system_data.get("products", [])
-        
-        # Normalizujemy produkty systemu
-        normalized_system_products = set()
-        for product in system_products:
-            normalized_product = product.replace(" ", "").lower()
-            normalized_system_products.add(normalized_product)
-        
-        logger.debug(f"System '{system_intent}' ma produkty: {system_products}")
-        logger.debug(f"Znormalizowane produkty systemu: {normalized_system_products}")
-        
-        # Sprawdzamy przecięcie znormalizowanych produktów
-        common_products = normalized_found_products.intersection(normalized_system_products)
-        
-        if common_products:
-            score = len(common_products)
-            matching_systems.append((page_num, system_intent, score))
-            logger.debug(f"✅ System '{system_intent}' ma {score} wspólnych produktów: {common_products}")
-        else:
-            logger.debug(f"❌ System '{system_intent}' nie ma wspólnych produktów")
-    
+        intent_norm = normalize_text(system_data["intent"])
+        match_ratio = difflib.SequenceMatcher(None, normalized_user, intent_norm).ratio()
+
+        if normalized_user == intent_norm:
+            exact_matches.update(system_data.get("products", []))
+            logger.debug(f"Exact system match: '{system_data['intent']}'")
+        elif match_ratio > 0.65 or any(t in intent_norm for t in user_tokens):
+            fuzzy_matches.update(system_data.get("products", []))
+            logger.debug(f"Fuzzy system match: '{system_data['intent']}' ({match_ratio:.2f})")
+
+    # Kolejność: najpierw exact, potem fuzzy
+    matching_products = list(exact_matches) + [p for p in fuzzy_matches if p not in exact_matches]
+    matching_products = sorted(matching_products)
+
+    if matching_products:
+        logger.info(f"🛠️ Znaleziono {len(matching_products)} pasujących produktów dla '{user_text_orig}'")
+
+        if return_products_only:
+            return matching_products
+
+        product_list = "\n".join([f"• {product}" for product in matching_products[:15]])  # max 15
+        initial_message = f"🛠️ Znalazłem pasujące produkty:\n{product_list}\n\nCo chcesz zobaczyć?"
+        buttons = [
+            {"type": "postback", "title": "Opis produktu", "payload": f"DESCRIBE_PRODUCT_{user_text_orig}"},
+            {"type": "postback", "title": "Systemy", "payload": f"SHOW_SYSTEMS_{user_text_orig}"}
+        ]
+        return [{
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": initial_message,
+                    "buttons": buttons
+                }
+            }
+        }]
+
+    logger.warning(f"⚠️ Nie znaleziono pasujących produktów dla '{user_text_orig}'")
+    return [{"text": "⚠️ Nie znalazłem pasujących produktów. Spróbuj inaczej!"}]
+
+
+def search_systems(sender_id, user_text):
+    user_text_lower = user_text.lower()
+    if user_text_lower.startswith("⚠️"):
+        logger.debug(f"Skipped processing error message: {user_text_lower}")
+        return None
+
+    found_products = search_products(sender_id, user_text, return_products_only=True)
+    matching_systems = []
+
+    # 1. Normalne dopasowanie po produktach
+    if found_products:
+        normalized_found_products = {normalize_text(p) for p in found_products}
+        for page_num, system_data in page_to_intent_products.items():
+            normalized_system_products = {normalize_text(p) for p in system_data.get("products", [])}
+            common_products = normalized_found_products & normalized_system_products
+            if common_products:
+                matching_systems.append((page_num, system_data["intent"], len(common_products)))
+
+    # 2. Fallback — dopasowanie po nazwie systemu
+    if not matching_systems:
+        user_tokens = [simple_stem(t) for t in user_text_lower.split()]
+        normalized_user = normalize_text(user_text_lower)
+        for page_num, system_data in page_to_intent_products.items():
+            intent_lower = system_data["intent"].lower()
+            intent_norm = normalize_text(intent_lower)
+            ratio = difflib.SequenceMatcher(None, normalized_user, intent_norm).ratio()
+            if ratio > 0.5 or any(t in intent_norm for t in user_tokens):
+                matching_systems.append((page_num, system_data["intent"], int(ratio * 100)))
+
     if matching_systems:
-        # Sortujemy według liczby wspólnych produktów (score)
         matching_systems.sort(key=lambda x: x[2], reverse=True)
         system_list = "\n".join([f"{i+1}. {system[1]}" for i, system in enumerate(matching_systems[:3])])
-        initial_message = f"🔍 Znaleziono pasujące systemy na podstawie produktów:\n{system_list}"
+        initial_message = f"🔍 Znaleziono pasujące systemy:\n{system_list}"
         buttons = [
             {"type": "postback", "title": f"System {i+1}", "payload": f"SELECT_SYSTEM_{system[0]}"}
             for i, system in enumerate(matching_systems[:3])
         ]
         logger.info(f"🔍 Znaleziono {len(matching_systems)} pasujących systemów dla '{user_text}'")
-        return [{"text": initial_message}, {"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Wybierz system:", "buttons": buttons}}}]
-    
-    logger.warning(f"⚠️ Nie znaleziono systemów pasujących do produktów dla '{user_text}'")
-    logger.debug(f"Sprawdzono {len(page_to_intent_products)} systemów w bazie")
-    return None
-
-def search_products(sender_id, user_text, return_products_only=False):
-    user_text = user_text.lower()
-    if user_text.startswith("⚠️"):
-        logger.debug(f"Skipped processing error message: {user_text}")
-        return None
-    
-    matching_products = set()  # Używamy set, aby uniknąć duplikatów
-    
-    # 1. Szukamy w keyword_to_products
-    for keyword, products in keyword_to_products.items():
-        keyword_lower = keyword.lower()
-        match_ratio = difflib.SequenceMatcher(None, user_text, keyword_lower).ratio()
-        if match_ratio > 0.4 or user_text in keyword_lower:
-            matching_products.update(products)
-            logger.debug(f"Dopasowano keyword '{keyword}' z ratio {match_ratio}")
-    
-    # 2. Szukamy w page_to_intent_products["products"]
-    for page_num, system_data in page_to_intent_products.items():
-        intent = system_data["intent"].lower()
-        system_products = system_data.get("products", [])
-        match_ratio = difflib.SequenceMatcher(None, user_text, intent).ratio()
-        if match_ratio > 0.4 or user_text in intent:
-            matching_products.update(system_products)
-            logger.debug(f"Dopasowano system '{intent}' z ratio {match_ratio}")
-    
-    # Konwertujemy na listę i sortujemy
-    matching_products = sorted(list(matching_products))
-    
-    if matching_products:
-        logger.info(f"🛠️ Znaleziono {len(matching_products)} pasujących produktów dla '{user_text}'")
-        
-        if return_products_only:
-            return matching_products  # Zwracamy listę produktów
-        
-        product_list = "\n".join([f"• {product}" for product in matching_products[:15]])  # Max 15
-        initial_message = f"🛠️ Znalazłem pasujące produkty:\n{product_list}\n\nCo chcesz zobaczyć?"
-        buttons = [
-            {"type": "postback", "title": "Opis produktu", "payload": f"DESCRIBE_PRODUCT_{user_text}"},
-            {"type": "postback", "title": "Systemy", "payload": f"SHOW_SYSTEMS_{user_text}"}
+        return [
+            {"text": initial_message},
+            {"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Wybierz system:", "buttons": buttons}}}
         ]
-        return [{"attachment": {"type": "template", "payload": {"template_type": "button", "text": initial_message, "buttons": buttons}}}]
-    
-    logger.warning(f"⚠️ Nie znaleziono pasujących produktów dla '{user_text}'")
-    return [{"text": "⚠️ Nie znalazłem pasujących produktów. Spróbuj inaczej!"}]
+
+    logger.warning(f"⚠️ Nie znaleziono systemów pasujących do zapytania '{user_text}'")
+    return [{"text": "⚠️ Nie znalazłem systemów pasujących do zapytania."}]
 
 def describe_product(sender_id, user_text):
     user_text = user_text.lower()
@@ -720,4 +738,5 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
