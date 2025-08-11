@@ -221,6 +221,61 @@ def search_products(sender_id, user_text, return_products_only=False):
 
     logger.warning(f"⚠️ Nie znaleziono pasujących produktów dla '{user_text}'")
     return [{"text": "⚠️ Nie znalazłem pasujących produktów. Spróbuj inaczej!"}]
+
+def search_systems(sender_id, user_text):
+    user_text_lower = user_text.lower().strip()
+    if user_text_lower.startswith("⚠️"):
+        logger.debug(f"Skipped processing error message: {user_text_lower}")
+        return None
+
+    found_products = search_products(sender_id, user_text, return_products_only=True)
+    matching_systems = []
+
+    # 1. Normalne dopasowanie po produktach
+    if found_products:
+        normalized_found_products = {_normalize_name(p) for p in found_products}
+        for page_num, system_data in page_to_intent_products.items():
+            normalized_system_products = {_normalize_name(p) for p in system_data.get("products", [])}
+            common_products = normalized_found_products & normalized_system_products
+            if common_products:
+                matching_systems.append((page_num, system_data["intent"], len(common_products)))
+
+    # 2. Fallback — dopasowanie po nazwie systemu (intent)
+    if not matching_systems:
+        normalized_user = _normalize_name(user_text_lower)
+        for page_num, system_data in page_to_intent_products.items():
+            intent_norm = _normalize_name(system_data["intent"])
+            ratio = difflib.SequenceMatcher(None, normalized_user, intent_norm).ratio()
+            if ratio > 0.5 or normalized_user in intent_norm:
+                matching_systems.append((page_num, system_data["intent"], int(ratio * 100)))
+
+    # 3. Zwracamy wynik
+    if matching_systems:
+        matching_systems.sort(key=lambda x: x[2], reverse=True)
+        system_list = "\n".join([f"{i+1}. {system[1]}" for i, system in enumerate(matching_systems[:3])])
+        initial_message = f"🔍 Znaleziono pasujące systemy:\n{system_list}"
+        buttons = [
+            {"type": "postback", "title": f"System {i+1}", "payload": f"SELECT_SYSTEM_{system[0]}"}
+            for i, system in enumerate(matching_systems[:3])
+        ]
+        logger.info(f"🔍 Znaleziono {len(matching_systems)} pasujących systemów dla '{user_text}'")
+        return [
+            {"text": initial_message},
+            {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "button",
+                        "text": "📋 Wybierz system:",
+                        "buttons": buttons
+                    }
+                }
+            }
+        ]
+
+    logger.warning(f"⚠️ Nie znaleziono systemów pasujących do zapytania '{user_text}'")
+    return [{"text": "⚠️ Nie znalazłem systemów pasujących do zapytania."}]
+
 def describe_product(sender_id, user_text):
     user_text = user_text.lower()
     logger.debug(f"📋 Rozpoczynam describe_product dla '{user_text}'")
@@ -686,6 +741,7 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
