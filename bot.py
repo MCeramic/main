@@ -606,6 +606,20 @@ def test_images():
     
     return {"images": results}
 
+# Dodaj też prosty test pojedynczego obrazu
+@app.route('/test-single-image')
+def test_single_image():
+    # Test pierwszego dostępnego obrazu
+    test_image = "system_lazienkowy_umiarkowane_obciazenie_wilgocia_uszczelnienie_zespolone.png"
+    image_url = f"{SERVER_URL}/images/{test_image}"
+    
+    return f'''
+    <h2>Test obrazu:</h2>
+    <p>URL: {image_url}</p>
+    <img src="{image_url}" style="max-width: 500px;" onerror="this.style.display='none'; this.nextSibling.style.display='block';">
+    <p style="display:none; color:red;">❌ Obraz nie może być załadowany</p>
+    '''
+
 def cleanup_old_users():
     now = datetime.now()
     cutoff_time = now - timedelta(days=30)
