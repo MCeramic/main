@@ -146,7 +146,7 @@ def split_message(text, max_length=1900):
         messages.append(current_message.strip())
     return messages
 
-# Improved system search with better filtering
+# Improved system search with better filtering and debugging
 def search_systems(sender_id, user_text):
     user_text = user_text.lower()
     if user_text.startswith("⚠️"):
@@ -159,22 +159,45 @@ def search_systems(sender_id, user_text):
         logger.warning(f"⚠️ Nie znaleziono produktów dla '{user_text}', więc brak systemów")
         return None
     
+    logger.debug(f"🔍 Znalezione produkty: {found_products}")
+    
+    # Normalizujemy znalezione produkty (usuń spacje, lowercase)
+    normalized_found_products = set()
+    for product in found_products:
+        normalized_product = product.replace(" ", "").lower()
+        normalized_found_products.add(normalized_product)
+    
+    logger.debug(f"🔍 Znormalizowane produkty: {normalized_found_products}")
+    
     # Szukamy systemów zawierających te produkty
     matching_systems = []
     for page_num, system_data in page_to_intent_products.items():
         system_intent = system_data["intent"].lower()
         system_products = system_data.get("products", [])
-        # Sprawdzamy, czy któryś z produktów systemu pokrywa się z znalezionymi produktami
-        common_products = set(found_products).intersection(system_products)
+        
+        # Normalizujemy produkty systemu
+        normalized_system_products = set()
+        for product in system_products:
+            normalized_product = product.replace(" ", "").lower()
+            normalized_system_products.add(normalized_product)
+        
+        logger.debug(f"System '{system_intent}' ma produkty: {system_products}")
+        logger.debug(f"Znormalizowane produkty systemu: {normalized_system_products}")
+        
+        # Sprawdzamy przecięcie znormalizowanych produktów
+        common_products = normalized_found_products.intersection(normalized_system_products)
+        
         if common_products:
-            score = len(common_products)  # Liczba wspólnych produktów jako wynik
+            score = len(common_products)
             matching_systems.append((page_num, system_intent, score))
-            logger.debug(f"System '{system_intent}' ma {score} wspólnych produktów: {common_products}")
+            logger.debug(f"✅ System '{system_intent}' ma {score} wspólnych produktów: {common_products}")
+        else:
+            logger.debug(f"❌ System '{system_intent}' nie ma wspólnych produktów")
     
     if matching_systems:
         # Sortujemy według liczby wspólnych produktów (score)
         matching_systems.sort(key=lambda x: x[2], reverse=True)
-        system_list = "\n".join([f"{i+1}. {system[1]}" for i, system in enumerate(matching_systems[:3])])  # Max 3
+        system_list = "\n".join([f"{i+1}. {system[1]}" for i, system in enumerate(matching_systems[:3])])
         initial_message = f"🔍 Znaleziono pasujące systemy na podstawie produktów:\n{system_list}"
         buttons = [
             {"type": "postback", "title": f"System {i+1}", "payload": f"SELECT_SYSTEM_{system[0]}"}
@@ -184,6 +207,7 @@ def search_systems(sender_id, user_text):
         return [{"text": initial_message}, {"attachment": {"type": "template", "payload": {"template_type": "button", "text": "📋 Wybierz system:", "buttons": buttons}}}]
     
     logger.warning(f"⚠️ Nie znaleziono systemów pasujących do produktów dla '{user_text}'")
+    logger.debug(f"Sprawdzono {len(page_to_intent_products)} systemów w bazie")
     return None
 
 def search_products(sender_id, user_text, return_products_only=False):
@@ -502,6 +526,30 @@ def describe_system(sender_id, page_num):
     
     logger.info(f"✅ Przygotowano system {page_num} z {len(messages)} wiadomościami")
     return messages
+    
+# Add this function to debug your data structures
+def debug_data_structures():
+    """Debug function to check data structure contents"""
+    logger.info("=== DEBUGGING DATA STRUCTURES ===")
+    
+    logger.info(f"page_to_intent_products keys: {list(page_to_intent_products.keys())}")
+    
+    for page_num, system_data in list(page_to_intent_products.items())[:3]:  # First 3 systems
+        logger.info(f"System {page_num}:")
+        logger.info(f"  Intent: {system_data.get('intent', 'N/A')}")
+        logger.info(f"  Products: {system_data.get('products', [])}")
+    
+    logger.info(f"keyword_to_products keys: {list(keyword_to_products.keys())[:5]}")  # First 5 keywords
+    
+    for keyword, products in list(keyword_to_products.items())[:2]:  # First 2 keywords
+        logger.info(f"Keyword '{keyword}' -> Products: {products}")
+    
+    logger.info(f"products_data keys: {list(products_data.keys())[:10]}")  # First 10 products
+    
+    logger.info("=== END DEBUG ===")
+
+# Call this function at startup or when you want to debug
+# debug_data_structures()
 
 @app.route('/test-images')
 def test_images():
@@ -672,3 +720,4 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
