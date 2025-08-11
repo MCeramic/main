@@ -146,12 +146,14 @@ def split_message(text, max_length=1900):
         messages.append(current_message.strip())
     return messages
 
-# Improved system search with better filtering and debugging
 def _normalize_name(s):
-    # usuń wszystkie znaki nie-alfanumeryczne i zamień na lowercase
+    """Usuń spacje i znaki specjalne, zamień na lowercase."""
     return "".join(ch.lower() for ch in s if ch.isalnum())
 
+
 def search_products(sender_id, user_text, return_products_only=False):
+    import difflib
+
     user_text_orig = user_text
     user_text = user_text.lower().strip()
     if user_text.startswith("⚠️"):
@@ -159,11 +161,9 @@ def search_products(sender_id, user_text, return_products_only=False):
         return None
 
     matching_products = set()
-
-    # Normalize user token for product-name matching
     u_norm = _normalize_name(user_text)
 
-    # --- 0) Szybkie dopasowanie po nazwach produktów (ważne dla "G10", "g 10", "G 10 PREMIUM" itp.)
+    # --- Dopasowanie po nazwach produktów (direct / substring / fuzzy) ---
     all_products = set()
     for p_list in keyword_to_products.values():
         all_products.update(p_list)
@@ -172,57 +172,64 @@ def search_products(sender_id, user_text, return_products_only=False):
 
     for prod in all_products:
         p_norm = _normalize_name(prod)
-        # exact / substring (np. 'g10' w 'ardexg10premium') lub odwrotnie
         if not u_norm:
             continue
         if u_norm == p_norm or u_norm in p_norm or p_norm in u_norm:
             matching_products.add(prod)
-            logger.debug(f"Produkt dopasowany (name match): '{prod}' <- '{user_text}'")
+            logger.debug(f"Produkt dopasowany (name match): '{prod}' <- '{user_text_orig}'")
             continue
-        # fuzzy jako fallback (wyższy próg, żeby nie spamować)
         score = difflib.SequenceMatcher(None, u_norm, p_norm).ratio()
         if score > 0.75:
             matching_products.add(prod)
-            logger.debug(f"Produkt dopasowany fuzzy (score {score:.2f}): '{prod}' <- '{user_text}'")
+            logger.debug(f"Produkt dopasowany fuzzy ({score:.2f}): '{prod}' <- '{user_text_orig}'")
 
-    # --- 1) Szukamy w keyword_to_products (jak wcześniej)
+    # --- Dopasowanie po keywordach ---
     for keyword, products in keyword_to_products.items():
         keyword_lower = keyword.lower()
         match_ratio = difflib.SequenceMatcher(None, user_text, keyword_lower).ratio()
         if match_ratio > 0.4 or user_text in keyword_lower:
             matching_products.update(products)
-            logger.debug(f"Dopasowano keyword '{keyword}' z ratio {match_ratio}")
+            logger.debug(f"Dopasowano keyword '{keyword}' z ratio {match_ratio:.2f}")
 
-    # --- 2) Szukamy w page_to_intent_products["intent"] (jak wcześniej)
+    # --- Dopasowanie po nazwach systemów (intent) ---
     for page_num, system_data in page_to_intent_products.items():
         intent = system_data["intent"].lower()
         system_products = system_data.get("products", [])
         match_ratio = difflib.SequenceMatcher(None, user_text, intent).ratio()
         if match_ratio > 0.4 or user_text in intent:
             matching_products.update(system_products)
-            logger.debug(f"Dopasowano system '{intent}' z ratio {match_ratio}")
+            logger.debug(f"Dopasowano system '{intent}' z ratio {match_ratio:.2f}")
 
-    # Konwertujemy na listę i sortujemy
     matching_products = sorted(list(matching_products))
 
     if matching_products:
         logger.info(f"🛠️ Znaleziono {len(matching_products)} pasujących produktów dla '{user_text}'")
-
         if return_products_only:
-            return matching_products  # Zwracamy listę produktów
-
-        product_list = "\n".join([f"• {product}" for product in matching_products[:15]])  # Max 15
+            return matching_products
+        product_list = "\n".join([f"• {product}" for product in matching_products[:15]])
         initial_message = f"🛠️ Znalazłem pasujące produkty:\n{product_list}\n\nCo chcesz zobaczyć?"
         buttons = [
             {"type": "postback", "title": "Opis produktu", "payload": f"DESCRIBE_PRODUCT_{user_text}"},
             {"type": "postback", "title": "Systemy", "payload": f"SHOW_SYSTEMS_{user_text}"}
         ]
-        return [{"attachment": {"type": "template", "payload": {"template_type": "button", "text": initial_message, "buttons": buttons}}}]
+        return [{
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "text": initial_message,
+                    "buttons": buttons
+                }
+            }
+        }]
 
     logger.warning(f"⚠️ Nie znaleziono pasujących produktów dla '{user_text}'")
     return [{"text": "⚠️ Nie znalazłem pasujących produktów. Spróbuj inaczej!"}]
 
+
 def search_systems(sender_id, user_text):
+    import difflib
+
     user_text_lower = user_text.lower().strip()
     if user_text_lower.startswith("⚠️"):
         logger.debug(f"Skipped processing error message: {user_text_lower}")
@@ -231,7 +238,7 @@ def search_systems(sender_id, user_text):
     found_products = search_products(sender_id, user_text, return_products_only=True)
     matching_systems = []
 
-    # 1. Normalne dopasowanie po produktach
+    # 1️⃣ Szukanie po produktach
     if found_products:
         normalized_found_products = {_normalize_name(p) for p in found_products}
         for page_num, system_data in page_to_intent_products.items():
@@ -240,7 +247,7 @@ def search_systems(sender_id, user_text):
             if common_products:
                 matching_systems.append((page_num, system_data["intent"], len(common_products)))
 
-    # 2. Fallback — dopasowanie po nazwie systemu (intent)
+    # 2️⃣ Fallback — dopasowanie po nazwie systemu (intent)
     if not matching_systems:
         normalized_user = _normalize_name(user_text_lower)
         for page_num, system_data in page_to_intent_products.items():
@@ -249,7 +256,7 @@ def search_systems(sender_id, user_text):
             if ratio > 0.5 or normalized_user in intent_norm:
                 matching_systems.append((page_num, system_data["intent"], int(ratio * 100)))
 
-    # 3. Zwracamy wynik
+    # 3️⃣ Wyniki
     if matching_systems:
         matching_systems.sort(key=lambda x: x[2], reverse=True)
         system_list = "\n".join([f"{i+1}. {system[1]}" for i, system in enumerate(matching_systems[:3])])
@@ -741,6 +748,7 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
