@@ -63,7 +63,7 @@ page_to_intent_products = {
     3: {"intent": "SYSTEM KLEJENIA ŁAZIENEK Umiarkowane obciążenie wilgocią. Mata uszczelniająca", "products": ["ARDEX AM 100", "ARDEX X 7 G PLUS", "ARDEX 7+8", "ARDEX G 10 PREMIUM", "ARDEX SK 12", "ARDEX SK 100 W", "ARDEX SE"], "image": "system_lazienkowy_umiarkowane_obciazenie_wilgocia_mata_uszczelniajaca.png"},
     4: {"intent": "SYSTEM KLEJENIA OKŁADZIN WIELKOFORMATOWYCH Jastrych cementowy wewnątrz pomieszczeń", "products": ["ARDEX P 52", "ARDEX CL 100", "ARDEX COLAFIX 8X8", "ARDEX G 10 PREMIUM", "ARDEX SE"], "image": "okladziny_wielkoformatowe_jastrych_cementowy_wewnatrz_pomieszczen.png"},
     5: {"intent": "SYSTEM KLEJENIA OKŁADZIN WIELKOFORMATOWYCH Jastrych anhydrytowy wewnątrz pomieszczeń", "products": ["ARDEX P 52", "ARDEX S 28 NEU", "ARDEX G 10 PREMIUM", "ARDEX SE"], "image": "okladziny_wielkoformatowe_jastrych_anhydrytowy_wewnatrz_pomieszczen.png"},
-    6: {"intent": "SYSTEM KLEJENIA KAMIENIA NATURALNEGO (wrażliwy na wilgoć) Wewnątrz pomieszczeń", "products": ["ARDEX P 52", "ARDEX CL 100", "ARDEX N 23", "ARDEX N 23 W", "ARDEX G 10", "ARDEX C1 100"], "image": "kamien_naturalny_wrazliwy_na_wilgoc_wewnatrz_pomieszczen.png"},
+    6: {"intent": "SYSTEM KLEJENIA KAMIENIA NATURALNEGO (wrażliwy na wilgoć) Wewnątrz pomieszczeń", "products": ["ARDEX P 52", "ARDEX CL 100", "ARDEX N 23", "ARDEX N 23 W", "ARDEX G 10 PREMIUM", "ARDEX CL 100"], "image": "kamien_naturalny_wrazliwy_na_wilgoc_wewnatrz_pomieszczen.png"},
     7: {"intent": "SYSTEM KLEJENIA KAMIENIA NATURALNEGO (niewrażliwy na wilgoć) Wewnątrz pomieszczeń", "products": ["ARDEX P 52", "ARDEX CL 100", "ARDEX X 7 G PLUS", "ARDEX X 7 W PLUS", "ARDEX G 10 PREMIUM", "ARDEX ST"], "image": "kamien_naturalny_niewrazliwy_na_wilgoc_wewnatrz_pomieszczen.png"},
     8: {"intent": "SYSTEM KLEJENIA KAMIENIA NATURALNEGO (niewrażliwy na wilgoć) Na zewnątrz pomieszczeń", "products": ["ARDEX AM 100", "ARDEX 8+9", "ARDEX SK 12", "ARDEX X 32", "ARDEX X 7 G PLUS", "ARDEX G 10 PREMIUM", "ARDEX SE"], "image": "kamien_naturalny_niewrazliwy_na_wilgoc_na_zewnatrz_pomieszczen.png"},
     9: {"intent": "SYSTEM KLEJENIA TARASOWO BALKONOWY Uszczelnienie zespolone", "products": ["ARDEX AM 100", "ARDEX 8+9", "ARDEX SK 12", "ARDEX X 7 G PLUS", "ARDEX G 10 PREMIUM", "ARDEX SE"], "image": "system_tarasowo_balkonowy_uszczelnienie_zespolone.png"},
@@ -748,6 +748,7 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
