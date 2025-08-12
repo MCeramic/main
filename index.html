@@ -2,15 +2,45 @@
 <html lang="pl">
 <head>
   <meta charset="UTF-8">
-  <title>Integracja z Facebook SDK</title>
+  <title>Facebook Login Example</title>
 </head>
 <body>
 
   <div id="fb-root"></div>
+  <h1>Facebook Login Demo</h1>
 
-  <h1>Przykład z Facebook SDK</h1>
+  <!-- Przycisk logowania -->
+  <fb:login-button 
+    scope="public_profile,email"
+    onlogin="checkLoginState();">
+  </fb:login-button>
+
+  <div id="status"></div>
 
   <script>
+    // Funkcja obsługująca wynik logowania
+    function statusChangeCallback(response) {
+      console.log("statusChangeCallback", response);
+      if (response.status === "connected") {
+        document.getElementById("status").innerHTML =
+          "✅ Zalogowany! Twój userID: " + response.authResponse.userID;
+      } else if (response.status === "not_authorized") {
+        document.getElementById("status").innerHTML =
+          "⚠️ Zalogowany do Facebooka, ale nie do aplikacji.";
+      } else {
+        document.getElementById("status").innerHTML =
+          "❌ Niezalogowany do Facebooka.";
+      }
+    }
+
+    // Callback wywoływany po kliknięciu przycisku logowania
+    function checkLoginState() {
+      FB.getLoginStatus(function(response) {
+        statusChangeCallback(response);
+      });
+    }
+
+    // Inicjalizacja SDK
     window.fbAsyncInit = function() {
       FB.init({
         appId      : '629499423325385',
@@ -18,9 +48,16 @@
         xfbml      : true,
         version    : 'v23.0'
       });
+
       FB.AppEvents.logPageView();
+
+      // Sprawdzenie statusu od razu po załadowaniu
+      FB.getLoginStatus(function(response) {
+        statusChangeCallback(response);
+      });
     };
 
+    // Ładowanie SDK asynchronicznie
     (function(d, s, id){
        var js, fjs = d.getElementsByTagName(s)[0];
        if (d.getElementById(id)) return;
