@@ -7,7 +7,7 @@ import os
 import requests
 import time
 import logging
-from flask import Flask, request, send_from_directory, Response
+from flask import Flask, request, send_from_directory, Response, render_template
 import difflib
 from datetime import datetime, timedelta
 
@@ -38,6 +38,10 @@ app = Flask(__name__)
 # Static server URL for Render
 SERVER_URL = "https://main-owe4.onrender.com"
 logger.info(f"🖧 Using static server URL: {SERVER_URL}")
+
+@app.route("/")
+def index():
+    return render_template("index.html")
 
 @app.route('/')
 def test():
@@ -748,6 +752,7 @@ if __name__ == "__main__":
     port = int(port_env)
     logger.info(f"🚀 Uruchamiam Flask na porcie {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
